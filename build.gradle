@@ -1,0 +1,54 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '4.0.1'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.example'
+version = '0.0.1-SNAPSHOT'
+description = 'EBO'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-webflux'
+
+
+    implementation 'org.mapstruct:mapstruct:1.5.5.Final'
+    annotationProcessor 'org.mapstruct:mapstruct-processor:1.5.5.Final'
+
+    // optional: helps MapStruct + Lombok play nicely in some IDE/build setups
+    annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
+
+//    // Reactive MyBatis Support (choose version compatible with your Spring Boot)
+    implementation "pro.chenggang:mybatis-r2dbc-spring:4.0.0.RELEASE"
+
+    // R2DBC Postgres driver
+//    implementation "org.springframework.boot:spring-boot-starter-data-r2dbc"
+    implementation "org.postgresql:r2dbc-postgresql"
+    // optional but recommended pooling
+    implementation 'io.r2dbc:r2dbc-pool'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

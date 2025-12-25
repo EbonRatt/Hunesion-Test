@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: EBO
+  r2dbc:
+    mybatis:
+      r2dbc-url: r2dbc:postgresql://localhost:5432/postgres
+      username: postgres
+      password: postgres
+
