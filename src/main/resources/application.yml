@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: Test-Demo-R2DBC
+  datasource:
+    url: ${JDBC_URL:jdbc:postgresql://localhost:5432/postgres}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+  r2dbc:
+    url: ${R2DBC_URL:r2dbc:postgresql://localhost:5432/postgres}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+
+  liquibase:
+    enabled: true
+    change-log: classpath:/db/changelog/db.changelog-master.yml
+
+#logging:
+#  level:
+#    liquibase: DEBUG
+#    liquibase.changelog: DEBUG
+#    liquibase.executor: DEBUG
