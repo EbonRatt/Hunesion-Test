@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: Test-Webflux
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/postgres
+    username: ebon
+    password: 123
+logging:
+  level:
+    io.r2dbc.postgresql.QUERY: DEBUG
+    io.r2dbc.postgresql.PARAM: DEBUG
+    org.springframework.r2dbc: DEBUG
