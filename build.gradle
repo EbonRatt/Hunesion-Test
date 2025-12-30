@@ -28,8 +28,16 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-webmvc'
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
-    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+
+    // Import only specific guacamole JARs (exclude fat JAR to avoid dependency conflicts)
+    implementation files(
+        'guacamole-client/guacamole-common-1.5.5.jar',
+        'guacamole-client/guacamole-ext-1.5.5.jar'
+    )
+
 }
 
 tasks.named('test') {
