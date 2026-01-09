@@ -1,0 +1,8 @@
+{
+  "username": "ebon",
+  "user_shell": "/bin/bash",
+  "user_groups": [
+    "sudo"
+  ],
+  "plain_password": "password"
+}
