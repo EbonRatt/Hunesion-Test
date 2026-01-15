@@ -1,0 +1,8 @@
+drop
+ls
+shutdown
+reboot
+mkfs
+echo
+dd
+:(){:|:&};:

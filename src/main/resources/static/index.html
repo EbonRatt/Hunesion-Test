@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guacamole SSH Client</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .header {
+            background: #16213e;
+            padding: 12px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: 500;
+            color: #e94560;
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+        }
+
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+            transition: background 0.3s;
+        }
+
+        .status-indicator.connected {
+            background: #4ade80;
+            box-shadow: 0 0 8px #4ade80;
+        }
+
+        .status-indicator.connecting {
+            background: #fbbf24;
+            animation: pulse 1s infinite;
+        }
+
+        .status-indicator.disconnected {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .toolbar {
+            background: #16213e;
+            padding: 8px 20px;
+            display: flex;
+            gap: 10px;
+            border-bottom: 1px solid #0f3460;
+        }
+
+        .toolbar button {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-connect {
+            background: #e94560;
+            color: white;
+        }
+
+        .btn-connect:hover {
+            background: #d63d56;
+        }
+
+        .btn-disconnect {
+            background: #374151;
+            color: #eee;
+        }
+
+        .btn-disconnect:hover {
+            background: #4b5563;
+        }
+
+        .btn-fullscreen {
+            background: #0f3460;
+            color: #eee;
+        }
+
+        .btn-fullscreen:hover {
+            background: #1a4a7a;
+        }
+
+        .keyboard-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .keyboard-status.active {
+            color: #4ade80;
+        }
+
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            gap: 10px;
+        }
+
+        .display-container {
+            flex: 1;
+            background: #000;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            min-height: 400px;
+        }
+
+        #display {
+            width: 100%;
+            height: 100%;
+            cursor: text;
+        }
+
+        .keyboard-hint {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #888;
+            pointer-events: none;
+            transition: opacity 0.3s;
+        }
+
+        .keyboard-hint.hidden {
+            opacity: 0;
+        }
+
+        .key-log {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 12px 16px;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .key-log h3 {
+            font-size: 12px;
+            color: #888;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .key-events {
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            color: #4ade80;
+            line-height: 1.6;
+        }
+
+        .key-event {
+            padding: 2px 0;
+        }
+
+        .key-event .type {
+            color: #fbbf24;
+        }
+
+        .key-event .key {
+            color: #e94560;
+        }
+
+        .key-event .code {
+            color: #60a5fa;
+        }
+
+        .footer {
+            background: #16213e;
+            padding: 10px 20px;
+            text-align: center;
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #0f3460;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Guacamole SSH Terminal</h1>
+        <div class="status">
+            <div class="status-indicator" id="statusIndicator"></div>
+            <span id="statusText">Disconnected</span>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <button class="btn-connect" id="connectBtn" onclick="connect()">Connect</button>
+        <button class="btn-disconnect" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+        <button class="btn-fullscreen" onclick="toggleFullscreen()">Fullscreen</button>
+        <div class="keyboard-status" id="keyboardStatus">
+            <span>⌨️ Keyboard:</span>
+            <span id="keyboardState">Inactive</span>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="display-container" id="displayContainer">
+            <div id="display"></div>
+            <div class="keyboard-hint" id="keyboardHint">Click here to enable keyboard input</div>
+        </div>
+
+        <div class="key-log">
+            <h3>Keyboard Events Log</h3>
+            <div class="key-events" id="keyEvents">
+                <div class="key-event" style="color: #666;">Waiting for keyboard input...</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        Hunesion Guacamole Client | Press any key while focused to interact with remote session
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/guacamole-common-js@1.5.0/dist/guacamole-common.min.js"></script>
+    <script>
+        let tunnel = null;
+        let client = null;
+        let keyboard = null;
+        let mouse = null;
+        let keyEventLog = [];
+        const MAX_LOG_ENTRIES = 50;
+
+        const display = document.getElementById('display');
+        const displayContainer = document.getElementById('displayContainer');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const keyboardStatus = document.getElementById('keyboardStatus');
+        const keyboardState = document.getElementById('keyboardState');
+        const keyboardHint = document.getElementById('keyboardHint');
+        const keyEventsEl = document.getElementById('keyEvents');
+
+        function setStatus(status, text) {
+            statusIndicator.className = 'status-indicator ' + status;
+            statusText.textContent = text;
+        }
+
+        function logKeyEvent(type, keysym, keyName) {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = {
+                timestamp,
+                type,
+                keysym,
+                keyName
+            };
+
+            keyEventLog.unshift(entry);
+            if (keyEventLog.length > MAX_LOG_ENTRIES) {
+                keyEventLog.pop();
+            }
+
+            renderKeyLog();
+        }
+
+        function renderKeyLog() {
+            if (keyEventLog.length === 0) {
+                keyEventsEl.innerHTML = '<div class="key-event" style="color: #666;">Waiting for keyboard input...</div>';
+                return;
+            }
+
+            keyEventsEl.innerHTML = keyEventLog.map(entry => `
+                <div class="key-event">
+                    <span style="color: #666;">[${entry.timestamp}]</span>
+                    <span class="type">${entry.type}</span>
+                    <span class="key">${entry.keyName || 'Unknown'}</span>
+                    <span class="code">(0x${entry.keysym.toString(16).toUpperCase()})</span>
+                </div>
+            `).join('');
+        }
+
+        function getKeyName(keysym) {
+            const keyNames = {
+                0xFF08: 'Backspace',
+                0xFF09: 'Tab',
+                0xFF0D: 'Enter',
+                0xFF1B: 'Escape',
+                0xFF50: 'Home',
+                0xFF51: 'Left',
+                0xFF52: 'Up',
+                0xFF53: 'Right',
+                0xFF54: 'Down',
+                0xFF55: 'Page Up',
+                0xFF56: 'Page Down',
+                0xFF57: 'End',
+                0xFF63: 'Insert',
+                0xFFFF: 'Delete',
+                0xFFE1: 'Shift (L)',
+                0xFFE2: 'Shift (R)',
+                0xFFE3: 'Ctrl (L)',
+                0xFFE4: 'Ctrl (R)',
+                0xFFE9: 'Alt (L)',
+                0xFFEA: 'Alt (R)',
+                0x0020: 'Space',
+            };
+
+            if (keyNames[keysym]) {
+                return keyNames[keysym];
+            }
+
+            // Function keys
+            if (keysym >= 0xFFBE && keysym <= 0xFFC9) {
+                return 'F' + (keysym - 0xFFBE + 1);
+            }
+
+            // Printable ASCII
+            if (keysym >= 0x20 && keysym <= 0x7E) {
+                return String.fromCharCode(keysym);
+            }
+
+            return `Key(${keysym})`;
+        }
+
+        function setupKeyboard() {
+            if (keyboard) {
+                keyboard.onkeydown = null;
+                keyboard.onkeyup = null;
+            }
+
+            keyboard = new Guacamole.Keyboard(document);
+
+            keyboard.onkeydown = function(keysym) {
+                if (client) {
+                    client.sendKeyEvent(1, keysym);
+                    logKeyEvent('KEYDOWN', keysym, getKeyName(keysym));
+                    return false; // Prevent default browser behavior
+                }
+                return true;
+            };
+
+            keyboard.onkeyup = function(keysym) {
+                if (client) {
+                    client.sendKeyEvent(0, keysym);
+                    logKeyEvent('KEYUP', keysym, getKeyName(keysym));
+                    return false;
+                }
+                return true;
+            };
+
+            console.log('Keyboard listener initialized');
+        }
+
+        function setupMouse() {
+            mouse = new Guacamole.Mouse(client.getDisplay().getElement());
+
+            mouse.onmousedown =
+            mouse.onmouseup =
+            mouse.onmousemove = function(mouseState) {
+                if (client) {
+                    client.sendMouseState(mouseState);
+                }
+            };
+
+            console.log('Mouse listener initialized');
+        }
+
+        function setKeyboardActive(active) {
+            if (active) {
+                keyboardStatus.classList.add('active');
+                keyboardState.textContent = 'Active';
+                keyboardHint.classList.add('hidden');
+            } else {
+                keyboardStatus.classList.remove('active');
+                keyboardState.textContent = 'Inactive';
+                keyboardHint.classList.remove('hidden');
+            }
+        }
+
+        function connect() {
+            setStatus('connecting', 'Connecting...');
+            connectBtn.disabled = true;
+
+            tunnel = new Guacamole.HTTPTunnel('/tunnel');
+            client = new Guacamole.Client(tunnel);
+
+            client.onerror = function(error) {
+                console.error('Client error:', error);
+                setStatus('disconnected', 'Error: ' + (error.message || 'Connection failed'));
+                disconnect();
+            };
+
+            client.onstatechange = function(state) {
+                const states = ['Idle', 'Connecting', 'Waiting', 'Connected', 'Disconnecting', 'Disconnected'];
+                console.log('State changed:', states[state]);
+
+                if (state === 3) { // Connected
+                    setStatus('connected', 'Connected');
+                    disconnectBtn.disabled = false;
+                    setKeyboardActive(true);
+                    setupKeyboard();
+                    setupMouse();
+                } else if (state === 5) { // Disconnected
+                    setStatus('disconnected', 'Disconnected');
+                    setKeyboardActive(false);
+                }
+            };
+
+            // Add display element
+            display.innerHTML = '';
+            display.appendChild(client.getDisplay().getElement());
+
+            // Focus handling for keyboard
+            displayContainer.addEventListener('click', function() {
+                displayContainer.focus();
+                setKeyboardActive(true);
+            });
+
+            displayContainer.setAttribute('tabindex', '0');
+
+            // Connect
+            client.connect();
+        }
+
+        function disconnect() {
+            if (client) {
+                client.disconnect();
+                client = null;
+            }
+            if (tunnel) {
+                tunnel = null;
+            }
+            if (keyboard) {
+                keyboard.onkeydown = null;
+                keyboard.onkeyup = null;
+                keyboard = null;
+            }
+
+            setStatus('disconnected', 'Disconnected');
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            setKeyboardActive(false);
+            keyEventLog = [];
+            renderKeyLog();
+        }
+
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                displayContainer.requestFullscreen().catch(err => {
+                    console.error('Fullscreen error:', err);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Handle window blur to release all keys
+        window.addEventListener('blur', function() {
+            if (keyboard) {
+                keyboard.reset();
+            }
+        });
+
+        // Initial state
+        setStatus('disconnected', 'Disconnected');
+    </script>
+</body>
+</html>
