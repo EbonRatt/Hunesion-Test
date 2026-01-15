@@ -16,25 +16,17 @@ import org.apache.guacamole.protocol.GuacamoleInstruction;
 import org.apache.guacamole.servlet.GuacamoleHTTPTunnelServlet;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.web.bind.annotation.*;
 
 import java.io.IOException;
 import java.time.LocalTime;
 
-@RestController
 public class GuacamoleController extends GuacamoleHTTPTunnelServlet {
-
-    @RequestMapping(path = "/tunnel", method = {RequestMethod.GET, RequestMethod.POST, RequestMethod.OPTIONS})
-    public void tunnel(HttpServletRequest request, HttpServletResponse response)
-            throws ServletException, IOException {
-        super.handleTunnelRequest(request, response);
-    }
 
     private static final Logger logger = LoggerFactory.getLogger(GuacamoleController.class);
 
     // Time-based access control (24-hour format)
     private static final LocalTime ALLOWED_START = LocalTime.of(13, 0);  // 1:00 PM
-    private static final LocalTime ALLOWED_END = LocalTime.of(15, 0);    // 2:00 PM
+    private static final LocalTime ALLOWED_END = LocalTime.of(17, 0);    // 2:00 PM
 
     @Override
     protected GuacamoleTunnel doConnect(HttpServletRequest request) throws GuacamoleException {
@@ -52,13 +44,52 @@ public class GuacamoleController extends GuacamoleHTTPTunnelServlet {
         }
         logger.info("Time check passed: {} is within allowed hours", now);
 
+        // Get dynamic connection parameters from frontend
+        String protocol = request.getParameter("protocol");
+        String hostname = request.getParameter("hostname");
+        String username = request.getParameter("username");
+        String password = request.getParameter("password");
+        String port = request.getParameter("port");
+
+        // Validate required parameters
+        if (hostname == null || hostname.isEmpty()) {
+            throw new GuacamoleException("Missing required parameter: hostname");
+        }
+        if (username == null || username.isEmpty()) {
+            throw new GuacamoleException("Missing required parameter: username");
+        }
+        if (password == null || password.isEmpty()) {
+            throw new GuacamoleException("Missing required parameter: password");
+        }
+
+        // Default protocol to SSH if not specified
+        if (protocol == null || protocol.isEmpty()) {
+            protocol = "ssh";
+        }
+
+        // Set default port based on protocol
+        if (port == null || port.isEmpty()) {
+            port = "rdp".equalsIgnoreCase(protocol) ? "3389" : "22";
+        }
+
+        logger.info("{} connection request - Host: {}, User: {}, Port: {}", protocol.toUpperCase(), hostname, username, port);
+
         try {
             GuacamoleConfiguration config = new GuacamoleConfiguration();
-            config.setProtocol("ssh");
-            config.setParameter("hostname", "192.168.230.128");
-            config.setParameter("port", "22");
-            config.setParameter("username", "ebon");
-            config.setParameter("password", "600");
+            config.setProtocol(protocol);
+            config.setParameter("hostname", hostname);
+            config.setParameter("port", port);
+            config.setParameter("username", username);
+            config.setParameter("password", password);
+
+            // RDP-specific settings
+            if ("rdp".equalsIgnoreCase(protocol)) {
+                config.setParameter("security", "any");
+                config.setParameter("ignore-cert", "true");
+                config.setParameter("enable-wallpaper", "false");
+                config.setParameter("enable-theming", "false");
+                config.setParameter("enable-font-smoothing", "false");
+            }
 
             logger.info("Connecting to guacd at localhost:4822");
 
@@ -69,8 +100,8 @@ public class GuacamoleController extends GuacamoleHTTPTunnelServlet {
 
             logger.info("Connection successful!");
             GuacamoleTunnel tunnel = new SimpleGuacamoleTunnel(socket);
-            return new LoggingGuacamoleTunnel(tunnel, logger);
-
+//            return new LoggingGuacamoleTunnel(tunnel, logger);
+            return tunnel;
         } catch (Exception e) {
             logger.error("Connection failed: ", e);
             throw new GuacamoleException("Failed to connect", e);
