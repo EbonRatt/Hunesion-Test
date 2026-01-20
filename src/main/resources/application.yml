@@ -1,0 +1,33 @@
+spring:
+  application:
+    name: webflux-v1
+  
+  # R2DBC Configuration for reactive database access
+  r2dbc:
+    url: r2dbc:mariadb://localhost:3306/mydatabase
+    username: user
+    password: 123
+  
+  # JDBC Configuration for Flyway
+  datasource:
+    url: jdbc:mariadb://localhost:3306/mydatabase
+    username: user
+    password: 123
+    driver-class-name: org.mariadb.jdbc.Driver
+  
+#  # Flyway Configuration
+#  flyway:
+#    enabled: true
+#    baseline-on-migrate: true
+#    clean-disabled: false
+#    locations: classpath:db/migration
+#    validate-on-migrate: true
+#    baseline-version: 1
+#    baseline-description: "Initial schema"
+#    out-of-order: false
+
+logging:
+  level:
+    io.r2dbc.mysql: DEBUG
+    org.springframework.r2dbc: DEBUG
+    org.springframework.data.r2dbc: DEBUG
