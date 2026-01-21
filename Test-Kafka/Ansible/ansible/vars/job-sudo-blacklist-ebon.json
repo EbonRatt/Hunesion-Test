@@ -1,9 +1,0 @@
-{
-  "username": "ebon",
-  "blacklist_commands": [
-    "/usr/bin/rm",
-    "/usr/bin/cat",
-    "/usr/bin/touch",
-    "/usr/bin/cp"
-  ]
-}
