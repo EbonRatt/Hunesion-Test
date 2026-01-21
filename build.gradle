@@ -33,7 +33,14 @@ dependencies {
     compileOnly 'org.projectlombok:lombok'
     runtimeOnly 'org.mariadb:r2dbc-mariadb:1.1.3'
     runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
+    
+    // MapStruct
+    implementation 'org.mapstruct:mapstruct:1.5.5.Final'
+    annotationProcessor 'org.mapstruct:mapstruct-processor:1.5.5.Final'
     annotationProcessor 'org.projectlombok:lombok'
+    
+    // For MapStruct and Lombok to work together
+    annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
     testImplementation 'org.springframework.boot:spring-boot-starter-data-r2dbc-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-webflux-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

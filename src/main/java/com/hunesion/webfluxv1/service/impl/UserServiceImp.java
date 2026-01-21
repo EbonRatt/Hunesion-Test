@@ -7,6 +7,7 @@ import com.hunesion.webfluxv1.service.UserService;
 import com.hunesion.webfluxv1.utils.ApiResponseWithPaginationUtils;
 import lombok.AllArgsConstructor;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -17,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.reactive.TransactionalOperator;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -25,6 +27,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class UserServiceImp implements UserService {
 
     private final UserRepository userRepository;
@@ -55,18 +58,16 @@ public class UserServiceImp implements UserService {
 
     @Override
     public Mono<User> saveUser(UserRequest user) {
-        System.out.println(">>> 1. saveUser method called");
+        return Mono.defer(() -> {
+            User newUser = User.builder()
+                    .id(UUID.randomUUID())
+                    .username(user.username())
+                    .email(user.email())
+                    .build();
 
-        User newUser = User.builder()
-                .id(UUID.randomUUID())
-                .username(user.username())
-                .email(user.email())
-                .build();
-
-        System.out.println(">>> 2. User object created: " + newUser);
-
-        return userRepository.insertUser(newUser.getId(), newUser.getUsername(), newUser.getEmail());
-
+            return userRepository.insertUser(newUser.getId(), newUser.getUsername(), newUser.getEmail())
+                    .doOnSuccess(u -> log.debug("User created: {}", u));
+        });
     }
 
     @Override
@@ -82,6 +83,8 @@ public class UserServiceImp implements UserService {
 
     @Override
     public Mono<Void> deleteUser(UUID id) {
-        return null;
+        return userRepository.findById(id)
+                .flatMap(userRepository::delete)
+                .switchIfEmpty(Mono.error(new RuntimeException("User not found")));
     }
 }

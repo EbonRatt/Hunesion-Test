@@ -15,6 +15,8 @@ public class PaginationResponse {
     private Integer currentPage;
     private Integer pageSize;
     private Integer totalPages;
+    private boolean hasNext;
+    private boolean hasPrevious;
 
     public static  <T> PaginationResponse paginationToResponse(Page<T> page) {
         return PaginationResponse.builder()
@@ -22,6 +24,8 @@ public class PaginationResponse {
                 .totalPages(page.getTotalPages())
                 .totalElements(page.getTotalElements())
                 .pageSize(page.getSize())
+                .hasNext(page.hasNext())
+                .hasPrevious(page.hasPrevious())
                 .build();
     }
 }
