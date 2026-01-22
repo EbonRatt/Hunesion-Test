@@ -7,7 +7,7 @@
     # defaults (can be overridden by Go via --extra-vars)
     username: "demo"
     user_shell: "/bin/bash"
-    user_groups: ["sudo"]
+    user_groups: []  # Empty by default - only add groups if provided
     plain_password: "password"
 
   tasks:
@@ -15,7 +15,7 @@
       ansible.builtin.user:
         name: "{{ username }}"
         shell: "{{ user_shell }}"
-        groups: "{{ user_groups }}"
+        groups: "{{ user_groups | default([]) }}"
         password: "{{ plain_password | ansible.builtin.password_hash('sha512') }}"
         append: true
         state: present
