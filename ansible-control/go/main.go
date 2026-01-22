@@ -163,6 +163,90 @@ func upsertHostInGroup(filePath, group, alias, hostLine string) error {
 	return os.WriteFile(filePath, []byte(strings.Join(out, "\n")), 0644)
 }
 
+func runPlaybookDeleteUser(ctx context.Context, playbookPath string, extraVarsFile string, limit string) (string, string, error) {
+	args := []string{
+		"compose", "exec", "-T", "ansible",
+		"ansible-playbook", playbookPath,
+		"-i", "/work/inventory/hosts.ini",
+		"-e", "@" + extraVarsFile,
+	}
+	if strings.TrimSpace(limit) != "" {
+		args = append(args, "-l", limit)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+
+	// Set working directory to project root (where docker-compose.yml should be)
+	wd, wdErr := os.Getwd()
+	if wdErr == nil {
+		if strings.Contains(wd, "ansible-control") {
+			projectRoot := filepath.Join(wd, "..", "..")
+			if absPath, absErr := filepath.Abs(projectRoot); absErr == nil {
+				cmd.Dir = absPath
+				log.Printf("Running docker compose from: %s\n", absPath)
+			}
+		} else {
+			cmd.Dir = wd
+			log.Printf("Running docker compose from: %s\n", wd)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+// removeHostFromGroup removes a host from a specific group in the hosts file
+func removeHostFromGroup(filePath, group, alias string) error {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	var out []string
+	grpHeader := "[" + group + "]"
+	inGroup := false
+	removed := false
+
+	sc := bufio.NewScanner(f)
+	for sc.Scan() {
+		line := sc.Text()
+		trim := strings.TrimSpace(line)
+
+		// section handling
+		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
+			inGroup = (trim == grpHeader)
+			out = append(out, line)
+			continue
+		}
+
+		// inside group: skip if alias matches
+		if inGroup {
+			if strings.HasPrefix(trim, alias+" ") || trim == alias {
+				removed = true
+				continue // skip this line (remove it)
+			}
+		}
+
+		out = append(out, line)
+	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+
+	if removed {
+		log.Printf("Removed host %s from group [%s]\n", alias, group)
+	} else {
+		log.Printf("Host %s not found in group [%s]\n", alias, group)
+	}
+
+	return os.WriteFile(filePath, []byte(strings.Join(out, "\n")), 0644)
+}
+
 // func main() {
 
 // 	// Create user on target1
@@ -511,8 +595,136 @@ func handleUpdateEvent(ctx context.Context, event *models.KafkaEvent) error {
 // handleDeleteEvent processes "Delete" events
 func handleDeleteEvent(ctx context.Context, event *models.KafkaEvent) error {
 	log.Printf("Processing DELETE event for playbook: %s\n", event.Playbook)
-	// Add your delete logic here
-	// For example: delete user, remove sudo blacklist, etc.
+
+	// Handle removing servers from hosts file (also handle typo "rmeove_server")
+	if event.Playbook == "remove_server" || event.Playbook == "delete_server" || event.Playbook == "rmeove_server" {
+		return handleRemoveServer(ctx, event)
+	}
+
+	// Handle deleting users
+	if event.Playbook == "delete_user" || event.Playbook == "remove_user" {
+		return handleDeleteUser(ctx, event)
+	}
+
+	// Add more delete handlers here...
+	log.Printf("Unhandled playbook for DELETE: %s\n", event.Playbook)
+	return nil
+}
+
+// handleRemoveServer removes target servers from the Ansible hosts file
+func handleRemoveServer(ctx context.Context, event *models.KafkaEvent) error {
+	// Get the hosts file path
+	projectRoot := filepath.Join("..", "..", "ansible")
+	invPath := filepath.Join(projectRoot, "inventory", "hosts.ini")
+
+	// Parse payload to get alias and group
+	var payloadData map[string]interface{}
+	groupName := "targets"
+	var aliasesToRemove []string
+
+	if len(event.Payload) > 0 {
+		if err := json.Unmarshal(event.Payload, &payloadData); err == nil {
+			// Get group from payload
+			if group, ok := payloadData["group"].(string); ok && group != "" {
+				groupName = group
+			}
+			// Get alias from payload
+			if alias, ok := payloadData["alias"].(string); ok && alias != "" {
+				aliasesToRemove = append(aliasesToRemove, alias)
+			}
+		}
+	}
+
+	// Fall back to target-server if no alias in payload
+	if len(aliasesToRemove) == 0 {
+		if len(event.TargetServer) > 0 {
+			aliasesToRemove = event.TargetServer
+			log.Printf("Using target-server: %v\n", aliasesToRemove)
+		} else {
+			return fmt.Errorf("alias is required (either in payload or target-server)")
+		}
+	}
+
+	log.Printf("Removing servers from Ansible hosts file: %v in group [%s]\n", aliasesToRemove, groupName)
+
+	// Process each server to remove
+	for _, serverAlias := range aliasesToRemove {
+		log.Printf("Removing server %s from group [%s]\n", serverAlias, groupName)
+		if err := removeHostFromGroup(invPath, groupName, serverAlias); err != nil {
+			log.Printf("Error removing server %s from hosts file: %v\n", serverAlias, err)
+			return fmt.Errorf("failed to remove server %s: %w", serverAlias, err)
+		}
+		log.Printf("Successfully removed server %s from hosts file\n", serverAlias)
+	}
+
+	return nil
+}
+
+// handleDeleteUser deletes users from target servers
+func handleDeleteUser(ctx context.Context, event *models.KafkaEvent) error {
+	log.Printf("Processing DELETE USER event\n")
+
+	// Parse payload to get username
+	var deleteUserVars struct {
+		Username    string `json:"username"`
+		RemoveHome  bool   `json:"remove_home,omitempty"`
+		ForceRemove bool   `json:"force_remove,omitempty"`
+	}
+
+	if len(event.Payload) == 0 {
+		return fmt.Errorf("payload is required for delete_user playbook")
+	}
+
+	if err := json.Unmarshal(event.Payload, &deleteUserVars); err != nil {
+		return fmt.Errorf("failed to parse delete_user payload: %w", err)
+	}
+
+	if deleteUserVars.Username == "" {
+		return fmt.Errorf("username is required in payload")
+	}
+
+	// Save vars file using fixed template name
+	projectRoot := filepath.Join("..", "..", "ansible")
+	varsDir := filepath.Join(projectRoot, "vars")
+	if err := os.MkdirAll(varsDir, 0755); err != nil {
+		return err
+	}
+
+	// Use fixed template file name: job-delete-users.json
+	fileName := "job-delete-users.json"
+	hostVarsPath := filepath.Join(varsDir, fileName)
+
+	b, err := json.MarshalIndent(deleteUserVars, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(hostVarsPath, b, 0644); err != nil {
+		return err
+	}
+
+	log.Printf("Created/Updated vars file: %s\n", hostVarsPath)
+
+	// Check if we should skip playbook execution (file-only mode)
+	skipExecution := len(event.TargetServer) == 0 || strings.Contains(event.Playbook, "_file")
+
+	if skipExecution {
+		log.Printf("Skipping playbook execution (file-only mode)\n")
+		return nil
+	}
+
+	// Run playbook on target servers
+	containerPath := "/work/vars/" + fileName
+	limit := strings.Join(event.TargetServer, ",")
+	out, errOut, err := runPlaybookDeleteUser(ctx, "/work/playbooks/delete_user.yml", containerPath, limit)
+
+	log.Printf("DELETE USER result - STDOUT: %s\n", out)
+	if errOut != "" {
+		log.Printf("DELETE USER result - STDERR: %s\n", errOut)
+	}
+	if err != nil {
+		log.Printf("DELETE USER result - ERROR: %v\n", err)
+		return err
+	}
 	return nil
 }
 
