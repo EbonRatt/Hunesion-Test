@@ -15,8 +15,10 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.support.PageableExecutionUtils;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -30,16 +32,18 @@ public class ItemServiceImp implements ItemService {
     private final ItemMapper itemMapper;
 
     @Override
-    public Mono<ItemResponse> createItem(ItemRequest itemRequest) {
-        return itemRepository.insertItem(
+    public Flux<ItemResponse> createItems(List<ItemRequest> itemRequests) {
+        return Flux.fromIterable(itemRequests)
+                .flatMap(request ->
+                        itemRepository.insertItem(
                                 UUID.randomUUID(),
-                                itemRequest.name(),
-                                itemRequest.description(),
-                                itemRequest.value(),
-                                itemRequest.rarity()
+                                request.name(),
+                                request.description(),
+                                request.value(),
+                                request.rarity()
                         )
-                        .map(itemMapper::itemToItemResponse).doOnSuccess(
-                                itemResponse -> log.info("Item created: {}", itemResponse));
+                )
+                .map(itemMapper::itemToItemResponse);
     }
 
     @Override
@@ -48,7 +52,7 @@ public class ItemServiceImp implements ItemService {
         return itemRepository.findAllBy(pageable)
                 .collectList()
                 .zipWith(itemRepository.count())
-                .map( tuple -> {
+                .map(tuple -> {
                     List<Item> items = tuple.getT1();
                     List<ItemResponse> itemResponses = items.stream().map(itemMapper::itemToItemResponse).collect(Collectors.toList());
                     long total = tuple.getT2();

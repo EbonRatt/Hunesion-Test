@@ -1,8 +1,10 @@
 package com.hunesion.webfluxv1.service.impl;
 
+import com.hunesion.webfluxv1.model.entity.Inventory;
 import com.hunesion.webfluxv1.model.entity.User;
 import com.hunesion.webfluxv1.model.request.UserRequest;
 import com.hunesion.webfluxv1.repository.UserRepository;
+import com.hunesion.webfluxv1.service.InventoryService;
 import com.hunesion.webfluxv1.service.UserService;
 import com.hunesion.webfluxv1.utils.ApiResponseWithPaginationUtils;
 import lombok.AllArgsConstructor;
@@ -31,7 +33,8 @@ import java.util.UUID;
 public class UserServiceImp implements UserService {
 
     private final UserRepository userRepository;
-    private final TransactionalOperator transactionalOperator;
+    private final InventoryService inventoryService;
+
 
     @Override
     public Mono<ApiResponseWithPaginationUtils<User>> findAllUsers(int page, int size, String sortBy, String sortDirection) {
@@ -57,6 +60,7 @@ public class UserServiceImp implements UserService {
     }
 
     @Override
+    @Transactional(transactionManager = "connectionFactoryTransactionManager")
     public Mono<User> saveUser(UserRequest user) {
         return Mono.defer(() -> {
             User newUser = User.builder()
@@ -64,8 +68,9 @@ public class UserServiceImp implements UserService {
                     .username(user.username())
                     .email(user.email())
                     .build();
-
             return userRepository.insertUser(newUser.getId(), newUser.getUsername(), newUser.getEmail())
+                    // create inventory for user
+                    .flatMap(u -> inventoryService.createInventoryForUser(u.getId()).thenReturn(u))
                     .doOnSuccess(u -> log.debug("User created: {}", u));
         });
     }

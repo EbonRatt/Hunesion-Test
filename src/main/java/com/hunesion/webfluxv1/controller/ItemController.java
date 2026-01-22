@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
@@ -33,8 +34,8 @@ public class ItemController {
     }
 
     @PostMapping
-    public Mono<ResponseEntity<ApiResponse<ItemResponse>>> createItem(@RequestBody ItemRequest itemRequest) {
-        return ResponseUtils.responseSingle("Item created successfully", HttpStatus.OK, itemService.createItem(itemRequest));
+    public Mono<ResponseEntity<ApiResponse<List<ItemResponse>>>> createItem(@RequestBody List<ItemRequest> itemRequest) {
+        return ResponseUtils.responseMulti("Item created successfully", HttpStatus.OK, itemService.createItems(itemRequest));
     }
 
     @DeleteMapping

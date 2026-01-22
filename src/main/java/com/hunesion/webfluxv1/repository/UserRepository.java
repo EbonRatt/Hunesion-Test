@@ -17,9 +17,9 @@ import java.util.UUID;
 public interface UserRepository extends R2dbcRepository<User, UUID> {
     Flux<User> findAllBy(Pageable pageable);
 
-    @Modifying
     @Query("INSERT INTO users (id, username, email) " +
-            "VALUES (:id, :username, :email)")
+            "VALUES (:id, :username, :email)" +
+            "RETURNING *")
     Mono<User> insertUser(UUID id, String username, String email);
 
 }
