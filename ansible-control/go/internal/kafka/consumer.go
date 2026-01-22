@@ -31,8 +31,12 @@ type Consumer struct {
 // NewConsumer creates a new Kafka consumer with the given configuration
 func NewConsumer(config Config, handler MessageHandler) *Consumer {
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers: []string{config.Broker},
-		Topic:   config.Topic,
+		Brokers:     []string{config.Broker},
+		Topic:       config.Topic,
+		StartOffset: kafka.LastOffset, // Start from the latest offset (only new messages)
+		GroupID:     "agent-consumer", // Empty = no consumer group, reads directly from topic
+		MinBytes:    1,                // Read even smallest messages
+		MaxBytes:    10e6,             // 10MB max
 	})
 
 	return &Consumer{
@@ -66,7 +70,7 @@ func (c *Consumer) Start(ctx context.Context) error {
 	fmt.Println("Starting Kafka Consumer...")
 	fmt.Printf("Broker: %s\n", c.config.Broker)
 	fmt.Printf("Topic: %s\n", c.config.Topic)
-	fmt.Println("Waiting for messages... (Press Ctrl+C to stop)")
+	fmt.Println("Waiting for NEW messages only (old messages will be skipped)...")
 	fmt.Println()
 
 	// Main consumption loop

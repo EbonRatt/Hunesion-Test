@@ -1,7 +1,0 @@
-{
-  "username": "alice",
-  "user_shell": "/bin/bash",
-  "user_groups": [
-    "sudo"
-  ]
-}

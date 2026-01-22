@@ -1,5 +1,7 @@
 package models
 
+import "encoding/json"
+
 // Vars represents variables for the create_user playbook.
 // Variables are passed to the playbook via the --extra-vars flag.
 type Vars struct {
@@ -19,4 +21,28 @@ type PasswordVars struct {
 type SudoBlacklistVars struct {
 	Username          string   `json:"username"`
 	BlacklistCommands []string `json:"blacklist_commands"`
+}
+
+// KafkaEvent represents the JSON structure received from Kafka
+type KafkaEvent struct {
+	EventType    string          `json:"event-type"`    // "Create", "Update", or "Delete"
+	TargetServer []string        `json:"target-server"` // Array of server names
+	OSType       string          `json:"OS-type"`       // "Linux" or "Windows"
+	User         string          `json:"user"`          // e.g., "admin"
+	Password     string          `json:"password"`      // e.g., "123"
+	Playbook     string          `json:"playbook"`      // e.g., "template-playbook"
+	Payload      json.RawMessage `json:"payload"`       // Dynamic value (can be any JSON)
+	Timestamp    string          `json:"timestamp"`     // Timestamp string
+}
+
+// ServerInfo represents server information for adding to Ansible hosts file
+type ServerInfo struct {
+	Alias                 string `json:"alias"`                             // Server alias (e.g., "target1")
+	AnsibleHost           string `json:"ansible_host"`                      // IP address or hostname
+	AnsibleUser           string `json:"ansible_user"`                      // SSH user
+	AnsiblePort           int    `json:"ansible_port"`                      // SSH port (default: 22)
+	AnsiblePassword       string `json:"ansible_password,omitempty"`        // SSH password (optional)
+	AnsibleBecomeMethod   string `json:"ansible_become_method,omitempty"`   // Become method: "su" or "sudo" (optional)
+	AnsibleBecomePassword string `json:"ansible_become_password,omitempty"` // Sudo/su password (optional)
+	Group                 string `json:"group,omitempty"`                   // Ansible group name (default: "targets")
 }
