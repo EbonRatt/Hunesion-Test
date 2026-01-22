@@ -109,9 +109,16 @@ func runPlaybookChangePassword(ctx context.Context, playbookPath string, extraVa
 }
 
 func upsertHostInGroup(filePath, group, alias, hostLine string) error {
-	f, err := os.Open(filePath)
+	// Get absolute path to ensure we're writing to the correct file
+	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+	log.Printf("upsertHostInGroup: filePath=%s, absPath=%s, group=%s, alias=%s\n", filePath, absPath, group, alias)
+
+	f, err := os.Open(absPath)
+	if err != nil {
+		return fmt.Errorf("failed to open file %s: %w", absPath, err)
 	}
 	defer f.Close()
 
@@ -119,6 +126,7 @@ func upsertHostInGroup(filePath, group, alias, hostLine string) error {
 	grpHeader := "[" + group + "]"
 	inGroup := false
 	found := false
+	groupAdded := false
 
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
@@ -127,12 +135,17 @@ func upsertHostInGroup(filePath, group, alias, hostLine string) error {
 
 		// section handling
 		if strings.HasPrefix(trim, "[") && strings.HasSuffix(trim, "]") {
-			// leaving group: if we didn't find alias, insert before next section
+			// leaving group: if we didn't find alias, append it before leaving
 			if inGroup && !found {
+				log.Printf("Leaving group [%s], appending %s before next section\n", group, alias)
 				out = append(out, hostLine)
 				found = true
 			}
 			inGroup = (trim == grpHeader)
+			if inGroup {
+				groupAdded = true
+				log.Printf("Found group header: %s\n", grpHeader)
+			}
 			out = append(out, line)
 			continue
 		}
@@ -140,6 +153,7 @@ func upsertHostInGroup(filePath, group, alias, hostLine string) error {
 		// inside group: replace if alias exists
 		if inGroup {
 			if strings.HasPrefix(trim, alias+" ") || trim == alias {
+				log.Printf("Found existing alias %s, replacing\n", alias)
 				out = append(out, hostLine)
 				found = true
 				continue // skip old line
@@ -149,18 +163,31 @@ func upsertHostInGroup(filePath, group, alias, hostLine string) error {
 		out = append(out, line)
 	}
 	if err := sc.Err(); err != nil {
-		return err
+		return fmt.Errorf("error reading file: %w", err)
 	}
 
-	// group not found: append group at end
-	if !strings.Contains(strings.Join(out, "\n"), grpHeader) {
-		out = append(out, "", grpHeader, hostLine, "")
+	// If group doesn't exist, create it at the end
+	if !groupAdded {
+		log.Printf("Group [%s] not found, creating at end\n", group)
+		if len(out) > 0 && out[len(out)-1] != "" {
+			out = append(out, "")
+		}
+		out = append(out, grpHeader, hostLine)
 	} else if inGroup && !found {
-		// file ended while still in group
+		// Group exists, we're still in it, and alias wasn't found - append at end of group
+		log.Printf("Appending %s to end of group [%s]\n", alias, group)
 		out = append(out, hostLine)
 	}
 
-	return os.WriteFile(filePath, []byte(strings.Join(out, "\n")), 0644)
+	result := strings.Join(out, "\n")
+	log.Printf("Writing to file %s:\n%s\n", absPath, result)
+
+	if err := os.WriteFile(absPath, []byte(result), 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	log.Printf("Successfully wrote to %s\n", absPath)
+	return nil
 }
 
 func runPlaybookDeleteUser(ctx context.Context, playbookPath string, extraVarsFile string, limit string) (string, string, error) {
@@ -329,10 +356,45 @@ func removeHostFromGroup(filePath, group, alias string) error {
 // based on the event-type field in the JSON
 func AnsibleEventHandler(ctx context.Context, msg kafkago.Message) error {
 	// Step 1: Check if message is valid JSON
+	msgValue := string(msg.Value)
+
 	var event models.KafkaEvent
 	if err := json.Unmarshal(msg.Value, &event); err != nil {
-		// Not valid JSON - treat as plain text message
-		log.Printf("Received plain text message: %s\n", string(msg.Value))
+		// Not valid JSON - log the error and the message
+		log.Printf("Failed to parse JSON: %v\n", err)
+		log.Printf("Message length: %d bytes\n", len(msg.Value))
+
+		// Show first 200 chars safely
+		previewLen := 200
+		if len(msgValue) < previewLen {
+			previewLen = len(msgValue)
+		}
+		log.Printf("First %d chars: %q\n", previewLen, msgValue[:previewLen])
+
+		// Try to find and report problematic characters (smart quotes, etc.)
+		problematicChars := []struct {
+			pos  int
+			char rune
+		}{}
+		for i, r := range msgValue {
+			// Check for smart quotes and other problematic Unicode characters
+			if r == 0x201C || r == 0x201D || r == 0x2018 || r == 0x2019 ||
+				(r > 127 && r < 256 && (r < 0x80 || r > 0x9F)) {
+				problematicChars = append(problematicChars, struct {
+					pos  int
+					char rune
+				}{i, r})
+			}
+		}
+
+		if len(problematicChars) > 0 {
+			log.Printf("Found %d potentially problematic characters:\n", len(problematicChars))
+			for _, pc := range problematicChars {
+				log.Printf("  Position %d: %q (U+%04X) - Replace with straight quote \"\n", pc.pos, pc.char, pc.char)
+			}
+		}
+
+		log.Printf("Received plain text message (JSON parse failed): %s\n", msgValue)
 		return nil // Don't treat as error, just skip it
 	}
 
@@ -346,6 +408,7 @@ func AnsibleEventHandler(ctx context.Context, msg kafkago.Message) error {
 	// Step 3: Log the received event
 	log.Printf("Received event: type=%s, playbook=%s, servers=%v, timestamp=%s\n",
 		event.EventType, event.Playbook, event.TargetServer, event.Timestamp)
+	log.Printf("Payload: %s\n", string(event.Payload))
 
 	// Step 4: Route based on event-type
 	switch strings.ToUpper(event.EventType) {
@@ -432,10 +495,32 @@ func handleCreateEvent(ctx context.Context, event *models.KafkaEvent) error {
 // handleAddServer adds target servers to the Ansible hosts file
 func handleAddServer(ctx context.Context, event *models.KafkaEvent) error {
 	log.Printf("Adding servers to Ansible hosts file: %v\n", event.TargetServer)
+	log.Printf("Payload: %s\n", string(event.Payload))
 
 	// Get the hosts file path
-	projectRoot := filepath.Join("..", "..", "ansible")
-	invPath := filepath.Join(projectRoot, "inventory", "hosts.ini")
+	// Get current working directory first
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+	log.Printf("Current working directory: %s\n", wd)
+
+	// If we're in ansible-control/go/, go up 2 levels to project root
+	var projectRoot string
+	if strings.Contains(wd, "ansible-control") {
+		projectRoot = filepath.Join(wd, "..", "..", "ansible")
+	} else {
+		projectRoot = filepath.Join(wd, "ansible")
+	}
+
+	// Get absolute path
+	absProjectRoot, err := filepath.Abs(projectRoot)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	invPath := filepath.Join(absProjectRoot, "inventory", "hosts.ini")
+	log.Printf("Hosts file path: %s\n", invPath)
 
 	// Default group name
 	groupName := "targets"
@@ -524,6 +609,11 @@ func handleAddServer(ctx context.Context, event *models.KafkaEvent) error {
 			hostLine += fmt.Sprintf(" ansible_become_password=%s", serverInfo.AnsibleBecomePassword)
 		}
 
+		// Add become method if provided (skip if "null")
+		if serverInfo.AnsibleBecomeMethod != "" && serverInfo.AnsibleBecomeMethod != "null" {
+			hostLine += fmt.Sprintf(" ansible_become_method=%s", serverInfo.AnsibleBecomeMethod)
+		}
+
 		// Use group from serverInfo if specified, otherwise use default
 		group := groupName
 		if serverInfo.Group != "" {
@@ -532,6 +622,7 @@ func handleAddServer(ctx context.Context, event *models.KafkaEvent) error {
 
 		// Add/update the host in the hosts file
 		log.Printf("Adding server to hosts file: %s in group [%s]\n", serverInfo.Alias, group)
+		log.Printf("Host line: %s\n", hostLine)
 		if err := upsertHostInGroup(invPath, group, serverInfo.Alias, hostLine); err != nil {
 			log.Printf("Error adding server %s to hosts file: %v\n", serverInfo.Alias, err)
 			return fmt.Errorf("failed to add server %s: %w", serverInfo.Alias, err)
