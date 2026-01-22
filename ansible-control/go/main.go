@@ -34,7 +34,7 @@ func runPlaybookCreateUser(ctx context.Context, playbookPath string, extraVarsFi
 	args := []string{
 		"compose", "exec", "-T", "ansible",
 		"ansible-playbook", playbookPath,
-		"-i", "/work/inventory/hosts.ini",
+		"-i", "/work/internal/inventory/files/hosts.ini",
 		"-e", "@" + extraVarsFile,
 	}
 	if strings.TrimSpace(limit) != "" {
@@ -73,7 +73,7 @@ func runPlaybookChangePassword(ctx context.Context, playbookPath string, extraVa
 	args := []string{
 		"compose", "exec", "-T", "ansible",
 		"ansible-playbook", playbookPath,
-		"-i", "/work/inventory/hosts.ini",
+		"-i", "/work/internal/inventory/files/hosts.ini",
 		"-e", "@" + extraVarsFile,
 	}
 	if strings.TrimSpace(limit) != "" {
@@ -194,7 +194,7 @@ func runPlaybookDeleteUser(ctx context.Context, playbookPath string, extraVarsFi
 	args := []string{
 		"compose", "exec", "-T", "ansible",
 		"ansible-playbook", playbookPath,
-		"-i", "/work/inventory/hosts.ini",
+		"-i", "/work/internal/inventory/files/hosts.ini",
 		"-e", "@" + extraVarsFile,
 	}
 	if strings.TrimSpace(limit) != "" {
@@ -441,8 +441,7 @@ func handleCreateEvent(ctx context.Context, event *models.KafkaEvent) error {
 		}
 
 		// Save vars file using fixed template name
-		projectRoot := filepath.Join("..", "..", "ansible")
-		varsDir := filepath.Join(projectRoot, "vars")
+		varsDir := filepath.Join("internal", "ansible", "vars")
 		if err := os.MkdirAll(varsDir, 0755); err != nil {
 			return err
 		}
@@ -471,10 +470,10 @@ func handleCreateEvent(ctx context.Context, event *models.KafkaEvent) error {
 		}
 
 		// Run playbook on target servers
-		containerPath := "/work/vars/" + fileName
+		containerPath := "/work/internal/ansible/vars/" + fileName
 		// Use target-server from event to limit which servers to run on
 		limit := strings.Join(event.TargetServer, ",")
-		out, errOut, err := runPlaybookCreateUser(ctx, "/work/playbooks/create_user.yml", containerPath, limit)
+		out, errOut, err := runPlaybookCreateUser(ctx, "/work/internal/ansible/playbooks/create_user.yml", containerPath, limit)
 
 		log.Printf("CREATE result - STDOUT: %s\n", out)
 		if errOut != "" {
@@ -497,30 +496,16 @@ func handleAddServer(ctx context.Context, event *models.KafkaEvent) error {
 	log.Printf("Adding servers to Ansible hosts file: %v\n", event.TargetServer)
 	log.Printf("Payload: %s\n", string(event.Payload))
 
-	// Get the hosts file path
-	// Get current working directory first
-	wd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get working directory: %w", err)
-	}
-	log.Printf("Current working directory: %s\n", wd)
-
-	// If we're in ansible-control/go/, go up 2 levels to project root
-	var projectRoot string
-	if strings.Contains(wd, "ansible-control") {
-		projectRoot = filepath.Join(wd, "..", "..", "ansible")
-	} else {
-		projectRoot = filepath.Join(wd, "ansible")
-	}
+	// Get the hosts file path from internal structure
+	invPath := filepath.Join("internal", "inventory", "files", "hosts.ini")
 
 	// Get absolute path
-	absProjectRoot, err := filepath.Abs(projectRoot)
+	absInvPath, err := filepath.Abs(invPath)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	invPath := filepath.Join(absProjectRoot, "inventory", "hosts.ini")
-	log.Printf("Hosts file path: %s\n", invPath)
+	log.Printf("Hosts file path: %s\n", absInvPath)
 
 	// Default group name
 	groupName := "targets"
@@ -623,7 +608,7 @@ func handleAddServer(ctx context.Context, event *models.KafkaEvent) error {
 		// Add/update the host in the hosts file
 		log.Printf("Adding server to hosts file: %s in group [%s]\n", serverInfo.Alias, group)
 		log.Printf("Host line: %s\n", hostLine)
-		if err := upsertHostInGroup(invPath, group, serverInfo.Alias, hostLine); err != nil {
+		if err := upsertHostInGroup(absInvPath, group, serverInfo.Alias, hostLine); err != nil {
 			log.Printf("Error adding server %s to hosts file: %v\n", serverInfo.Alias, err)
 			return fmt.Errorf("failed to add server %s: %w", serverInfo.Alias, err)
 		}
@@ -646,8 +631,7 @@ func handleUpdateEvent(ctx context.Context, event *models.KafkaEvent) error {
 		}
 
 		// Save vars file
-		projectRoot := filepath.Join("..", "..", "ansible")
-		varsDir := filepath.Join(projectRoot, "vars")
+		varsDir := filepath.Join("internal", "ansible", "vars")
 		if err := os.MkdirAll(varsDir, 0755); err != nil {
 			return err
 		}
@@ -664,9 +648,9 @@ func handleUpdateEvent(ctx context.Context, event *models.KafkaEvent) error {
 		}
 
 		// Run playbook on target servers
-		containerPath := "/work/vars/" + fileName
+		containerPath := "/work/internal/ansible/vars/" + fileName
 		limit := strings.Join(event.TargetServer, ",")
-		out, errOut, err := runPlaybookChangePassword(ctx, "/work/playbooks/change_password.yml", containerPath, limit)
+		out, errOut, err := runPlaybookChangePassword(ctx, "/work/internal/ansible/playbooks/change_password.yml", containerPath, limit)
 
 		log.Printf("UPDATE result - STDOUT: %s\n", out)
 		if errOut != "" {
@@ -704,9 +688,16 @@ func handleDeleteEvent(ctx context.Context, event *models.KafkaEvent) error {
 
 // handleRemoveServer removes target servers from the Ansible hosts file
 func handleRemoveServer(ctx context.Context, event *models.KafkaEvent) error {
-	// Get the hosts file path
-	projectRoot := filepath.Join("..", "..", "ansible")
-	invPath := filepath.Join(projectRoot, "inventory", "hosts.ini")
+	// Get the hosts file path from internal structure
+	invPath := filepath.Join("internal", "inventory", "files", "hosts.ini")
+
+	// Get absolute path
+	absInvPath, err := filepath.Abs(invPath)
+	if err != nil {
+		return fmt.Errorf("failed to get absolute path: %w", err)
+	}
+
+	log.Printf("Hosts file path: %s\n", absInvPath)
 
 	// Parse payload to get alias and group
 	var payloadData map[string]interface{}
@@ -741,7 +732,7 @@ func handleRemoveServer(ctx context.Context, event *models.KafkaEvent) error {
 	// Process each server to remove
 	for _, serverAlias := range aliasesToRemove {
 		log.Printf("Removing server %s from group [%s]\n", serverAlias, groupName)
-		if err := removeHostFromGroup(invPath, groupName, serverAlias); err != nil {
+		if err := removeHostFromGroup(absInvPath, groupName, serverAlias); err != nil {
 			log.Printf("Error removing server %s from hosts file: %v\n", serverAlias, err)
 			return fmt.Errorf("failed to remove server %s: %w", serverAlias, err)
 		}
@@ -775,8 +766,7 @@ func handleDeleteUser(ctx context.Context, event *models.KafkaEvent) error {
 	}
 
 	// Save vars file using fixed template name
-	projectRoot := filepath.Join("..", "..", "ansible")
-	varsDir := filepath.Join(projectRoot, "vars")
+	varsDir := filepath.Join("internal", "ansible", "vars")
 	if err := os.MkdirAll(varsDir, 0755); err != nil {
 		return err
 	}
@@ -806,7 +796,7 @@ func handleDeleteUser(ctx context.Context, event *models.KafkaEvent) error {
 	// Run playbook on target servers
 	containerPath := "/work/vars/" + fileName
 	limit := strings.Join(event.TargetServer, ",")
-	out, errOut, err := runPlaybookDeleteUser(ctx, "/work/playbooks/delete_user.yml", containerPath, limit)
+	out, errOut, err := runPlaybookDeleteUser(ctx, "/work/internal/ansible/playbooks/delete_user.yml", containerPath, limit)
 
 	log.Printf("DELETE USER result - STDOUT: %s\n", out)
 	if errOut != "" {
