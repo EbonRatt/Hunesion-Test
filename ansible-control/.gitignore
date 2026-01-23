@@ -1,0 +1,26 @@
+# Build output directory (executables go here)
+# This prevents compiled binaries from being committed to git
+bin/
+
+# Go binaries (if accidentally built in source directory)
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+
+# Go coverage output
+*.out
+
+# Go workspace file
+go.work
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
