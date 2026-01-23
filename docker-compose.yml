@@ -5,10 +5,11 @@ services:
       dockerfile: Dockerfile
     container_name: ansible
     volumes:
-      - ./ansible:/work
+      - ./ansible-control/go:/work:rw
     working_dir: /work
     environment:
       - ANSIBLE_HOST_KEY_CHECKING=False
       - ANSIBLE_RETRY_FILES_ENABLED=False
     stdin_open: true
     tty: true
+    restart: unless-stopped

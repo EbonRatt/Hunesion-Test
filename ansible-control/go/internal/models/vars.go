@@ -46,3 +46,14 @@ type ServerInfo struct {
 	AnsibleBecomePassword string `json:"ansible_become_password,omitempty"` // Sudo/su password (optional)
 	Group                 string `json:"group,omitempty"`                   // Ansible group name (default: "targets")
 }
+
+// KafkaResponseEvent represents the response sent back to Kafka after processing an event
+type KafkaResponseEvent struct {
+	Status       string   `json:"status"`          // "success" or "error"
+	EventType    string   `json:"event-type"`      // Original event type (e.g., "Create", "Delete")
+	Playbook     string   `json:"playbook"`        // Original playbook name
+	TargetServer []string `json:"target-server"`   // Servers that were processed
+	Message      string   `json:"message"`         // Human-readable message
+	Timestamp    string   `json:"timestamp"`       // Response timestamp
+	Error        string   `json:"error,omitempty"` // Error message if status is "error"
+}

@@ -34,7 +34,7 @@ func NewConsumer(config Config, handler MessageHandler) *Consumer {
 		Brokers:     []string{config.Broker},
 		Topic:       config.Topic,
 		StartOffset: kafka.LastOffset, // Start from the latest offset (only new messages)
-		GroupID:     "agent-consumer", // Empty = no consumer group, reads directly from topic
+		GroupID:     "agent",          // Empty = no consumer group, reads directly from topic
 		MinBytes:    1,                // Read even smallest messages
 		MaxBytes:    10e6,             // 10MB max
 	})
