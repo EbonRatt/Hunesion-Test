@@ -121,6 +121,11 @@ func HandleCreateEvent(ctx context.Context, event *models.KafkaEvent, producer *
 func HandleUpdateEvent(ctx context.Context, event *models.KafkaEvent, producer *kafka.Producer, responseTopic string) error {
 	log.Printf("Processing UPDATE event for playbook: %s\n", event.Playbook)
 
+	// Handle enabling users (re-enable after soft delete)
+	if event.Playbook == "enable_user" || event.Playbook == "enable_user_file" {
+		return HandleEnableUser(ctx, event, producer, responseTopic)
+	}
+
 	// Example: If playbook is "change_password", update password
 	if event.Playbook == "change_password" {
 		var passwordVars models.PasswordVars

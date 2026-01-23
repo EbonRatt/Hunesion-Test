@@ -1,4 +1,4 @@
 {
-  "remove_home": true,
+  "shell": "/bin/bash",
   "username": "hehe"
 }

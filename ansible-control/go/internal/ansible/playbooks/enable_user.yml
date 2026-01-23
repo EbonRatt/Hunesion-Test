@@ -1,4 +1,4 @@
-- name: Disable user on targets (soft delete)
+- name: Enable user on targets (re-enable after soft delete)
   hosts: targets
   become: true
   gather_facts: false
@@ -6,6 +6,7 @@
   vars:
     # defaults (can be overridden by Go via --extra-vars)
     username: "demo"
+    shell: "/bin/bash"  # Default shell to restore, can be overridden
 
   tasks:
     - name: Check if user exists
@@ -20,13 +21,13 @@
         msg: "User '{{ username }}' does not exist on {{ inventory_hostname }}"
       when: user_check.rc != 0
 
-    - name: Lock user account (disable password login)
-      ansible.builtin.command: passwd -l "{{ username }}"
+    - name: Unlock user account (enable password login)
+      ansible.builtin.command: passwd -u "{{ username }}"
       changed_when: true
       failed_when: false
 
-    - name: Disable user shell (prevent login)
+    - name: Restore user shell (enable login)
       ansible.builtin.user:
         name: "{{ username }}"
-        shell: /usr/sbin/nologin
+        shell: "{{ shell }}"
       changed_when: true

@@ -139,3 +139,40 @@ func RunPlaybookDeleteUser(ctx context.Context, playbookPath string, extraVarsFi
 	err := cmd.Run()
 	return stdout.String(), stderr.String(), err
 }
+
+// RunPlaybookEnableUser runs the enable_user playbook
+func RunPlaybookEnableUser(ctx context.Context, playbookPath string, extraVarsFile string, limit string) (string, string, error) {
+	args := []string{
+		"compose", "exec", "-T", "ansible",
+		"ansible-playbook", playbookPath,
+		"-i", "internal/inventory/files/hosts.ini",
+		"-e", "@" + extraVarsFile,
+	}
+	if strings.TrimSpace(limit) != "" {
+		args = append(args, "-l", limit)
+	}
+
+	cmd := exec.CommandContext(ctx, "docker", args...)
+
+	// Set working directory to project root (where docker-compose.yml should be)
+	wd, wdErr := os.Getwd()
+	if wdErr == nil {
+		if strings.Contains(wd, "ansible-control") {
+			projectRoot := filepath.Join(wd, "..", "..")
+			if absPath, absErr := filepath.Abs(projectRoot); absErr == nil {
+				cmd.Dir = absPath
+				log.Printf("Running docker compose from: %s\n", absPath)
+			}
+		} else {
+			cmd.Dir = wd
+			log.Printf("Running docker compose from: %s\n", wd)
+		}
+	}
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}

@@ -162,9 +162,9 @@ func HandleCreateUser(ctx context.Context, event *models.KafkaEvent, producer *k
 	return nil
 }
 
-// HandleDeleteUser deletes users from target servers
+// HandleDeleteUser disables users on target servers (soft delete)
 func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *kafka.Producer, responseTopic string) error {
-	log.Printf("Processing DELETE USER event\n")
+	log.Printf("Processing DELETE USER event (soft delete - disable)\n")
 
 	// Parse payload to get username
 	var deleteUserVars struct {
@@ -219,9 +219,9 @@ func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *k
 	// Use relative path since working_dir in container is /work
 	out, errOut, err := ansible.RunPlaybookDeleteUser(ctx, "internal/ansible/playbooks/delete_user.yml", containerPath, limit)
 
-	log.Printf("DELETE USER result - STDOUT: %s\n", out)
+	log.Printf("DISABLE USER result - STDOUT: %s\n", out)
 	if errOut != "" {
-		log.Printf("DELETE USER result - STDERR: %s\n", errOut)
+		log.Printf("DISABLE USER result - STDERR: %s\n", errOut)
 	}
 
 	// Check for "no hosts matched" or host not found errors (even if playbook didn't fail)
@@ -230,7 +230,7 @@ func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *k
 		strings.Contains(combinedOutput, "could not match supplied host pattern") ||
 		strings.Contains(combinedOutput, "provided hosts list is empty") {
 		errorMsg := fmt.Sprintf("Target server(s) not found in inventory. Please register the server(s) first: %v", event.TargetServer)
-		log.Printf("DELETE USER ERROR: %s\n", errorMsg)
+		log.Printf("DISABLE USER ERROR: %s\n", errorMsg)
 		return fmt.Errorf(errorMsg)
 	}
 
@@ -242,7 +242,6 @@ func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *k
 		// Check for "user not found" or "does not exist" patterns (only in error context)
 		userNotFoundPatterns := []string{
 			"user '" + usernameLower + "' does not exist on",
-			"userdel: user '" + usernameLower + "' does not exist",
 			"failed: user '" + usernameLower + "' does not exist",
 			"id: '" + usernameLower + "': no such user",
 		}
@@ -250,7 +249,7 @@ func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *k
 		for _, pattern := range userNotFoundPatterns {
 			if strings.Contains(combinedOutput, pattern) {
 				errorMsg := fmt.Sprintf("User '%s' does not exist on target server(s)", deleteUserVars.Username)
-				log.Printf("DELETE USER ERROR: %s\n", errorMsg)
+				log.Printf("DISABLE USER ERROR: %s\n", errorMsg)
 				// Return error - main handler will send response
 				return fmt.Errorf(errorMsg)
 			}
@@ -260,12 +259,12 @@ func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *k
 		if strings.Contains(combinedOutput, "fatal:") ||
 			strings.Contains(combinedOutput, "error!") ||
 			strings.Contains(combinedOutput, "unreachable=") {
-			errorMsg := fmt.Sprintf("Failed to delete user '%s': %v", deleteUserVars.Username, err)
-			log.Printf("DELETE USER ERROR: %s\n", errorMsg)
+			errorMsg := fmt.Sprintf("Failed to disable user '%s': %v", deleteUserVars.Username, err)
+			log.Printf("DISABLE USER ERROR: %s\n", errorMsg)
 			return fmt.Errorf(errorMsg)
 		}
 
-		log.Printf("DELETE USER result - ERROR: %v\n", err)
+		log.Printf("DISABLE USER result - ERROR: %v\n", err)
 		return err
 	}
 
@@ -273,8 +272,125 @@ func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *k
 	clearPasswordFromVarsFile(hostVarsPath, "")
 
 	// Send success response
-	successMsg := fmt.Sprintf("Successfully deleted user '%s' from target server(s)", deleteUserVars.Username)
-	log.Printf("DELETE USER SUCCESS: %s\n", successMsg)
+	successMsg := fmt.Sprintf("Successfully disabled user '%s' on target server(s) (soft delete)", deleteUserVars.Username)
+	log.Printf("DISABLE USER SUCCESS: %s\n", successMsg)
+	SendResponse(ctx, producer, responseTopic, event, "success", successMsg, "")
+	return nil
+}
+
+// HandleEnableUser enables users on target servers (re-enable after soft delete)
+func HandleEnableUser(ctx context.Context, event *models.KafkaEvent, producer *kafka.Producer, responseTopic string) error {
+	log.Printf("Processing ENABLE USER event\n")
+
+	// Parse payload to get username and optional shell
+	var enableUserVars struct {
+		Username string `json:"username"`
+		Shell    string `json:"shell,omitempty"` // Optional shell to restore (default: /bin/bash)
+	}
+
+	if len(event.Payload) == 0 {
+		return fmt.Errorf("payload is required for enable_user playbook")
+	}
+
+	if err := json.Unmarshal(event.Payload, &enableUserVars); err != nil {
+		return fmt.Errorf("failed to parse enable_user payload: %w", err)
+	}
+
+	if enableUserVars.Username == "" {
+		return fmt.Errorf("username is required in payload")
+	}
+
+	// Set default shell if not provided
+	if enableUserVars.Shell == "" {
+		enableUserVars.Shell = "/bin/bash"
+	}
+
+	// Save vars file
+	varsDir := filepath.Join("internal", "ansible", "vars")
+	if err := os.MkdirAll(varsDir, 0755); err != nil {
+		return err
+	}
+
+	fileName := "job-enable-users.json"
+	hostVarsPath := filepath.Join(varsDir, fileName)
+
+	b, err := json.MarshalIndent(enableUserVars, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(hostVarsPath, b, 0644); err != nil {
+		return err
+	}
+
+	log.Printf("Created/Updated vars file: %s\n", hostVarsPath)
+
+	// Check if we should skip playbook execution (file-only mode)
+	skipExecution := len(event.TargetServer) == 0 || strings.Contains(event.Playbook, "_file")
+
+	if skipExecution {
+		log.Printf("Skipping playbook execution (file-only mode)\n")
+		return nil
+	}
+
+	// Run playbook on target servers
+	containerPath := "/work/internal/ansible/vars/" + fileName
+	limit := strings.Join(event.TargetServer, ",")
+	out, errOut, err := ansible.RunPlaybookEnableUser(ctx, "internal/ansible/playbooks/enable_user.yml", containerPath, limit)
+
+	log.Printf("ENABLE USER result - STDOUT: %s\n", out)
+	if errOut != "" {
+		log.Printf("ENABLE USER result - STDERR: %s\n", errOut)
+	}
+
+	// Check for "no hosts matched" or host not found errors (even if playbook didn't fail)
+	combinedOutput := strings.ToLower(out + errOut)
+	if strings.Contains(combinedOutput, "no hosts matched") ||
+		strings.Contains(combinedOutput, "could not match supplied host pattern") ||
+		strings.Contains(combinedOutput, "provided hosts list is empty") {
+		errorMsg := fmt.Sprintf("Target server(s) not found in inventory. Please register the server(s) first: %v", event.TargetServer)
+		log.Printf("ENABLE USER ERROR: %s\n", errorMsg)
+		return fmt.Errorf(errorMsg)
+	}
+
+	// Only check for errors if the playbook actually failed
+	if err != nil {
+		// Check if user not found or other errors by examining the output
+		usernameLower := strings.ToLower(enableUserVars.Username)
+
+		// Check for "user not found" or "does not exist" patterns (only in error context)
+		userNotFoundPatterns := []string{
+			"user '" + usernameLower + "' does not exist on",
+			"failed: user '" + usernameLower + "' does not exist",
+			"id: '" + usernameLower + "': no such user",
+		}
+
+		for _, pattern := range userNotFoundPatterns {
+			if strings.Contains(combinedOutput, pattern) {
+				errorMsg := fmt.Sprintf("User '%s' does not exist on target server(s)", enableUserVars.Username)
+				log.Printf("ENABLE USER ERROR: %s\n", errorMsg)
+				return fmt.Errorf(errorMsg)
+			}
+		}
+
+		// Check for other specific failure patterns (avoid matching "failed=0" which means success)
+		if strings.Contains(combinedOutput, "fatal:") ||
+			strings.Contains(combinedOutput, "error!") ||
+			strings.Contains(combinedOutput, "unreachable=") {
+			errorMsg := fmt.Sprintf("Failed to enable user '%s': %v", enableUserVars.Username, err)
+			log.Printf("ENABLE USER ERROR: %s\n", errorMsg)
+			return fmt.Errorf(errorMsg)
+		}
+
+		log.Printf("ENABLE USER result - ERROR: %v\n", err)
+		return err
+	}
+
+	// Success - clear sensitive data from vars file for security
+	clearPasswordFromVarsFile(hostVarsPath, "")
+
+	// Send success response
+	successMsg := fmt.Sprintf("Successfully enabled user '%s' on target server(s)", enableUserVars.Username)
+	log.Printf("ENABLE USER SUCCESS: %s\n", successMsg)
 	SendResponse(ctx, producer, responseTopic, event, "success", successMsg, "")
 	return nil
 }
