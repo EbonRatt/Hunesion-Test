@@ -2,6 +2,24 @@
 
 This document provides examples of Kafka message structures for various operations.
 
+## Field Name Formats
+
+The system supports **both camelCase and kebab-case** field names for flexibility:
+
+- ✅ `event-type` or `eventType`
+- ✅ `target-server` or `targetServer`
+- ✅ `OS-type` or `osType`
+- ✅ `timestamp` (supports both string and number formats)
+
+### Timestamp Format
+
+The `timestamp` field accepts:
+- **String format**: `"2024-01-15T10:30:00Z"` or any ISO 8601 format
+- **Number format**: Unix timestamp (seconds, with optional decimal precision)
+  - Example: `1769398926.675463900` (will be converted to RFC3339 format)
+
+Both formats are automatically handled and converted internally.
+
 ## Enable User (Re-enable after soft delete)
 
 ### Message Structure

@@ -25,8 +25,10 @@ func RunPlaybook(ctx context.Context, playbookPath string) (string, string, erro
 
 // RunPlaybookCreateUser runs the create_user playbook
 func RunPlaybookCreateUser(ctx context.Context, playbookPath string, extraVarsFile string, limit string) (string, string, error) {
+	// Use "run" instead of "exec" - "run" creates a new container if service is not running
+	// "exec" requires the service to already be running
 	args := []string{
-		"compose", "exec", "-T", "ansible",
+		"compose", "run", "--rm", "-T", "ansible",
 		"ansible-playbook", playbookPath,
 		"-i", "internal/inventory/files/hosts.ini",
 		"-e", "@" + extraVarsFile,
@@ -65,8 +67,9 @@ func RunPlaybookCreateUser(ctx context.Context, playbookPath string, extraVarsFi
 
 // RunPlaybookChangePassword runs the change_password playbook
 func RunPlaybookChangePassword(ctx context.Context, playbookPath string, extraVarsFile string, limit string) (string, string, error) {
+	// Use "run" instead of "exec" - "run" creates a new container if service is not running
 	args := []string{
-		"compose", "exec", "-T", "ansible",
+		"compose", "run", "--rm", "-T", "ansible",
 		"ansible-playbook", playbookPath,
 		"-i", "internal/inventory/files/hosts.ini",
 		"-e", "@" + extraVarsFile,
@@ -105,8 +108,9 @@ func RunPlaybookChangePassword(ctx context.Context, playbookPath string, extraVa
 
 // RunPlaybookDeleteUser runs the delete_user playbook
 func RunPlaybookDeleteUser(ctx context.Context, playbookPath string, extraVarsFile string, limit string) (string, string, error) {
+	// Use "run" instead of "exec" - "run" creates a new container if service is not running
 	args := []string{
-		"compose", "exec", "-T", "ansible",
+		"compose", "run", "--rm", "-T", "ansible",
 		"ansible-playbook", playbookPath,
 		"-i", "internal/inventory/files/hosts.ini",
 		"-e", "@" + extraVarsFile,
@@ -142,8 +146,9 @@ func RunPlaybookDeleteUser(ctx context.Context, playbookPath string, extraVarsFi
 
 // RunPlaybookEnableUser runs the enable_user playbook
 func RunPlaybookEnableUser(ctx context.Context, playbookPath string, extraVarsFile string, limit string) (string, string, error) {
+	// Use "run" instead of "exec" - "run" creates a new container if service is not running
 	args := []string{
-		"compose", "exec", "-T", "ansible",
+		"compose", "run", "--rm", "-T", "ansible",
 		"ansible-playbook", playbookPath,
 		"-i", "internal/inventory/files/hosts.ini",
 		"-e", "@" + extraVarsFile,

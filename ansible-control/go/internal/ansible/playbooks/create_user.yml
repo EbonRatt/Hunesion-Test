@@ -11,12 +11,18 @@
     plain_password: "password"
 
   tasks:
+    - name: Validate username format
+      ansible.builtin.fail:
+        msg: "Invalid username format. Username contains invalid characters or spaces: '{{ username }}'"
+      when: "' ' in username or username|length == 0"
+
     - name: Check if user already exists
       ansible.builtin.command: id "{{ username }}"
       register: user_check
-      failed_when: false
       changed_when: false
-      no_log: true
+      failed_when: false
+      ignore_errors: true
+      no_log: false
 
     - name: Fail if user already exists
       ansible.builtin.fail:

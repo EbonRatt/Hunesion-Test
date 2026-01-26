@@ -67,6 +67,14 @@ func HandleCreateUser(ctx context.Context, event *models.KafkaEvent, producer *k
 		return fmt.Errorf("failed to parse create_user payload: %w", err)
 	}
 
+	// Validate username format (no spaces, not empty)
+	if userVars.Username == "" {
+		return fmt.Errorf("username is required and cannot be empty")
+	}
+	if strings.Contains(userVars.Username, " ") {
+		return fmt.Errorf("username cannot contain spaces: '%s'", userVars.Username)
+	}
+
 	// Save vars file using fixed template name
 	varsDir := filepath.Join("internal", "ansible", "vars")
 	if err := os.MkdirAll(varsDir, 0755); err != nil {
@@ -139,17 +147,46 @@ func HandleCreateUser(ctx context.Context, event *models.KafkaEvent, producer *k
 			}
 		}
 
-		// Check for other specific failure patterns (avoid matching "failed=0" which means success)
-		if strings.Contains(combinedOutput, "fatal:") ||
-			strings.Contains(combinedOutput, "error!") ||
-			strings.Contains(combinedOutput, "unreachable=") {
-			errorMsg := fmt.Sprintf("Failed to create user '%s': %v", userVars.Username, err)
+		// Check for connection/unreachable errors
+		if strings.Contains(combinedOutput, "unreachable") ||
+			strings.Contains(combinedOutput, "connection refused") ||
+			strings.Contains(combinedOutput, "timed out") ||
+			strings.Contains(combinedOutput, "no route to host") {
+			errorMsg := fmt.Sprintf("Cannot connect to target server(s). Please check server connectivity and SSH configuration: %v", event.TargetServer)
 			log.Printf("CREATE USER ERROR: %s\n", errorMsg)
 			return fmt.Errorf(errorMsg)
 		}
 
+		// Check for permission/authentication errors
+		if strings.Contains(combinedOutput, "permission denied") ||
+			strings.Contains(combinedOutput, "authentication failed") ||
+			strings.Contains(combinedOutput, "access denied") {
+			errorMsg := fmt.Sprintf("Permission denied. Please check SSH credentials and sudo/become configuration for server(s): %v", event.TargetServer)
+			log.Printf("CREATE USER ERROR: %s\n", errorMsg)
+			return fmt.Errorf(errorMsg)
+		}
+
+		// Check for other specific failure patterns (avoid matching "failed=0" which means success)
+		if strings.Contains(combinedOutput, "fatal:") ||
+			strings.Contains(combinedOutput, "error!") {
+			// Try to extract more specific error message from output
+			errorMsg := fmt.Sprintf("Failed to create user '%s' on target server(s)", userVars.Username)
+
+			// Look for more specific error messages in the output
+			if strings.Contains(combinedOutput, "invalid username") {
+				errorMsg = fmt.Sprintf("Invalid username format: '%s'", userVars.Username)
+			} else if strings.Contains(combinedOutput, "invalid characters") {
+				errorMsg = fmt.Sprintf("Username contains invalid characters: '%s'", userVars.Username)
+			}
+
+			log.Printf("CREATE USER ERROR: %s\n", errorMsg)
+			log.Printf("Full output for debugging: %s\n", combinedOutput)
+			return fmt.Errorf(errorMsg)
+		}
+
 		log.Printf("CREATE result - ERROR: %v\n", err)
-		return err
+		log.Printf("Full output for debugging: %s\n", combinedOutput)
+		return fmt.Errorf("Failed to create user '%s': %v", userVars.Username, err)
 	}
 
 	// Success - clear password from vars file for security
@@ -162,16 +199,66 @@ func HandleCreateUser(ctx context.Context, event *models.KafkaEvent, producer *k
 	return nil
 }
 
+// DeleteUserVars represents variables for the delete_user playbook
+type DeleteUserVars struct {
+	Username    string `json:"username"`
+	RemoveHome  bool   `json:"remove_home,omitempty"`
+	ForceRemove bool   `json:"force_remove,omitempty"`
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling to handle boolean fields as both string and bool.
+// This is necessary because Java Map<String, String> sends all values as strings.
+func (d *DeleteUserVars) UnmarshalJSON(data []byte) error {
+	// First, unmarshal into a map to handle flexible field types
+	var raw map[string]interface{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Helper function to get string value
+	getString := func(key string) string {
+		if val, ok := raw[key]; ok && val != nil {
+			if str, ok := val.(string); ok {
+				return str
+			}
+		}
+		return ""
+	}
+
+	// Helper function to get bool value (handles both string and bool)
+	// This is critical for Java Map<String, String> which sends booleans as strings
+	getBool := func(key string, defaultValue bool) bool {
+		if val, ok := raw[key]; ok && val != nil {
+			switch v := val.(type) {
+			case bool:
+				return v
+			case string:
+				// Handle string format (from Java Map<String, String>)
+				if v == "true" || v == "True" || v == "TRUE" {
+					return true
+				}
+				if v == "false" || v == "False" || v == "FALSE" {
+					return false
+				}
+			}
+		}
+		return defaultValue
+	}
+
+	// Extract all fields
+	d.Username = getString("username")
+	d.RemoveHome = getBool("remove_home", false)
+	d.ForceRemove = getBool("force_remove", false)
+
+	return nil
+}
+
 // HandleDeleteUser disables users on target servers (soft delete)
 func HandleDeleteUser(ctx context.Context, event *models.KafkaEvent, producer *kafka.Producer, responseTopic string) error {
 	log.Printf("Processing DELETE USER event (soft delete - disable)\n")
 
 	// Parse payload to get username
-	var deleteUserVars struct {
-		Username    string `json:"username"`
-		RemoveHome  bool   `json:"remove_home,omitempty"`
-		ForceRemove bool   `json:"force_remove,omitempty"`
-	}
+	var deleteUserVars DeleteUserVars
 
 	if len(event.Payload) == 0 {
 		return fmt.Errorf("payload is required for delete_user playbook")
